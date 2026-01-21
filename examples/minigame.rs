@@ -9,26 +9,6 @@ use std::time::{Duration, Instant};
 
 struct EnemyData { index: usize, x_base: i32, amplitude: f32, frequency: f32, speed_y: usize, t: f32 }
 
-
-fn create_player() -> Sprite {
-    let bitmap: Vec<Vec<u32>> = (0..8).map(|row| {
-        (0..8).map(|col| if (row + col) % 2 == 0 { FOREST_GREEN } else { DARK_GREEN }).collect()
-    }).collect();
-
-    let mut sprite = Sprite {
-        sprite_type: SpriteType::Player,
-        health: 100,
-        position: (375, 500),
-        size: (8, 8),
-        render: SpriteRender::Bitmap { pixels: bitmap },
-        velocity: (0.0, 0.0),
-        gravity: Direction::None,
-        is_solid: false,
-    };
-    sprite.upscale(8);
-    sprite
-}
-
 fn remove_menu_text(window: &mut Window, menu: &Menu, prefix: &str) {
     for i in 0..menu.options.len() {
         window.remove_text(&format!("{}_{}", prefix, i));
@@ -42,8 +22,8 @@ fn main_menu(window: &mut Window, keyboard: &mut Keyboard) {
         keyboard.update();
         menu.draw(window, "main_option");
 
-        if keyboard.clicked(Key::Char('w')) { menu.move_up(); }
-        if keyboard.clicked(Key::Char('s')) { menu.move_down(); }
+        if keyboard.clicked(Key::Char('w')) | keyboard.clicked(Key::Up) { menu.move_up(); }
+        if keyboard.clicked(Key::Char('s')) | keyboard.clicked(Key::Down) { menu.move_down(); }
 
         if keyboard.clicked(Key::Enter) {
             match menu.current() {
@@ -61,7 +41,7 @@ fn main_menu(window: &mut Window, keyboard: &mut Keyboard) {
 }
 
 fn main() {
-    let bgs = Bgs::new(SoundSource::File("assets/audio/bgs/Fog over the Old Road.wav"));
+    let bgs = Bgs::new(SoundSource::File("assets/audio/bgs/Crimson Turn-Based Clash.wav"));
     bgs.playing(true);
     let mut window = Window::new("Arc Shooter", 800, 600);
     window.set_background_color(BLACK);
@@ -94,13 +74,14 @@ fn main() {
         keyboard.update();
 
         // --- Toggle pause ---
-        if keyboard.clicked(Key::Escape) { paused = !paused; }
+        if keyboard.clicked(Key::Escape) { paused = true; }
 
         // --- PAUSE MENU ---
         if paused {
             pause_menu.draw(&mut window, "pause_option");
-            if keyboard.clicked(Key::Char('w')) { pause_menu.move_up(); }
-            if keyboard.clicked(Key::Char('s')) { pause_menu.move_down(); }
+            
+            if keyboard.clicked(Key::Char('w')) | keyboard.clicked(Key::Up) { pause_menu.move_up(); }
+            if keyboard.clicked(Key::Char('s')) | keyboard.clicked(Key::Down) { pause_menu.move_down(); }
 
             if keyboard.clicked(Key::Enter) {
                 match pause_menu.current() {
@@ -204,7 +185,7 @@ fn main() {
                 dead_sprites.push(e.index);
             }
 
-            if window.sprites[e.index].health <= 0 { score += 100; dead_sprites.push(e.index); }
+            if window.sprites[e.index].health <= 0 { score += 100; dead_sprites.push(e.index); audio.play(SoundSource::File("assets/audio/sfx/hit.wav")); }
         }
 
         // --- Cleanup ---
@@ -229,8 +210,8 @@ fn main() {
                 keyboard.update();
                 gameover_menu.draw(&mut window, "gameover_option");
 
-                if keyboard.clicked(Key::Char('w')) { gameover_menu.move_up(); }
-                if keyboard.clicked(Key::Char('s')) { gameover_menu.move_down(); }
+                if keyboard.clicked(Key::Char('w')) | keyboard.clicked(Key::Up) { gameover_menu.move_up(); }
+                if keyboard.clicked(Key::Char('s')) | keyboard.clicked(Key::Down) { gameover_menu.move_down(); }
 
                 if keyboard.clicked(Key::Enter) {
                     match gameover_menu.current() {
@@ -259,4 +240,136 @@ fn main() {
             }
         }
     }
+}
+
+
+fn row_fuselage(start: usize, end: usize) -> Vec<u32> {
+    let mut r = vec![0; 64];
+    for x in start..end { r[x] = WHITE; }
+    r
+}
+
+fn row_cockpit() -> Vec<u32> {
+    let mut r = vec![0; 64];
+    for x in 26..38 { r[x] = WHITE; }
+    for x in 29..35 { r[x] = FOREST_GREEN; }
+    r
+}
+
+fn row_wings(start: usize, end: usize) -> Vec<u32> {
+    let mut r = vec![0; 64];
+    for x in start..end { r[x] = DARK_GREEN; }
+    for x in 26..38 { r[x] = WHITE; }
+    r
+}
+
+fn row_tail_wings(start: usize, end: usize) -> Vec<u32> {
+    let mut r = vec![0; 64];
+    for x in start..end { r[x] = DARK_GREEN; }
+    for x in 28..36 { r[x] = WHITE; }
+    r
+}
+
+fn row_tail_fin() -> Vec<u32> {
+    let mut r = vec![0; 64];
+    for x in 30..34 { r[x] = WHITE; }
+    r
+}
+
+
+fn create_player() -> Sprite {
+
+    let plane_bitmap: Vec<Vec<u32>> = vec![
+        // 0–7 nose
+        vec![0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,WHITE,WHITE,WHITE,WHITE,WHITE,WHITE,WHITE,WHITE,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+        vec![0;64],
+        vec![0;64],
+        vec![0;64],
+        vec![0;64],
+        vec![0;64],
+        vec![0;64],
+        vec![0;64],
+
+        // 8–15 tapered nose
+        row_fuselage(30,34),
+        row_fuselage(29,35),
+        row_fuselage(28,36),
+        row_fuselage(28,36),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(26,38),
+        row_fuselage(26,38),
+
+        // 16–23 cockpit
+        row_cockpit(),
+        row_cockpit(),
+        row_fuselage(26,38),
+        row_fuselage(26,38),
+        row_fuselage(26,38),
+        row_fuselage(26,38),
+        row_fuselage(26,38),
+        row_fuselage(26,38),
+
+        // 24–31 wings
+        row_wings(10,54),
+        row_wings(12,52),
+        row_wings(14,50),
+        row_wings(16,48),
+        row_wings(18,46),
+        row_wings(20,44),
+        row_wings(22,42),
+        row_wings(24,40),
+
+        // 32–43 tail boom
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+        row_fuselage(27,37),
+
+        // 44–51 tail wings
+        row_tail_wings(22,42),
+        row_tail_wings(24,40),
+        row_tail_wings(26,38),
+        row_tail_wings(26,38),
+        row_tail_wings(24,40),
+        row_tail_wings(22,42),
+        row_fuselage(28,36),
+        row_fuselage(28,36),
+
+        // 52–63 tail fin
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+        row_tail_fin(),
+    ];
+
+
+    let sprite = Sprite {
+        sprite_type: SpriteType::Player,
+        health: 100,
+        position: (375, 500),
+        size: (8, 8),
+        render: SpriteRender::Bitmap { pixels: plane_bitmap },
+        velocity: (0.0, 0.0),
+        gravity: Direction::None,
+        is_solid: false,
+    };
+    // sprite.upscale(8);
+    sprite
 }
