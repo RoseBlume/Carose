@@ -31,14 +31,23 @@ impl Menu {
             window.remove_text(&id);
         }
 
-        let start_y = 200;
+        let (width, height) = window.get_size();
+
+        // Calculate starting Y so the menu is vertically centered
         let gap = 50;
+        let total_height = gap * (self.options.len() - 1);
+        let start_y = (height / 2).saturating_sub(total_height / 2);
+
         for (i, option) in self.options.iter().enumerate() {
             let color = if i == self.selected { self.selected_col } else { self.unselected };
+            let text_width = option.len() * 5 * 5; // rough width approximation for AutoFit 5x5 font scaled by size
+            let x = width / 2 - text_width / 2;    // center text horizontally
+            let y = start_y + i * gap;
+
             window.show_text(
                 &format!("{}_{}", id_prefix, i),
                 option,
-                (350, start_y + i * gap),
+                (x, y),
                 5,
                 color,
                 TextAlign::AutoFit,

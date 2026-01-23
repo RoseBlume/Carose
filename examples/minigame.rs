@@ -1,13 +1,11 @@
 use carose::{Window, TextAlign, Menu};
-use carose::colors::{WHITE, RED, FOREST_GREEN, DARK_GREEN, BLACK};
-use carose::sprites::{Direction, SpriteType, SpriteRender, Sprite};
+use carose::colors::{WHITE, RED, BLACK};
+use carose::sprites::{SpriteType, SpriteRender, Sprite, Vector};
 use carose::audio::{Audio, Bgs, SoundSource, BuiltInSound};
-use carose::controls::{Keyboard, Key};
+use carose::controls::Key;
 use rand::Rng;
 use std::thread;
 use std::time::{Duration, Instant};
-
-struct EnemyData { index: usize, x_base: i32, amplitude: f32, frequency: f32, speed_y: usize, t: f32 }
 
 fn remove_menu_text(window: &mut Window, menu: &Menu, prefix: &str) {
     for i in 0..menu.options.len() {
@@ -15,53 +13,110 @@ fn remove_menu_text(window: &mut Window, menu: &Menu, prefix: &str) {
     }
 }
 
-fn main_menu(window: &mut Window, keyboard: &mut Keyboard) {
+fn handle_menu_input(window: &mut Window, menu: &mut Menu) {
+    if window.controls.clicked(Key::Char('w')) | window.controls.clicked(Key::Up) {
+        menu.move_up();
+    }
+    if window.controls.clicked(Key::Char('s')) | window.controls.clicked(Key::Down) {
+        menu.move_down();
+    }
+}
+
+fn main_menu(window: &mut Window, bgs: &mut Bgs) -> usize {
     let mut menu = Menu::new(vec!["Play", "Exit"], RED, BLACK);
     window.set_background_color(WHITE);
+    let player_index;
+
     loop {
-        keyboard.update();
+        window.update_controls();
+        let (width, height) = window.get_size();
+
         menu.draw(window, "main_option");
+        handle_menu_input(window, &mut menu);
 
-        if keyboard.clicked(Key::Char('w')) | keyboard.clicked(Key::Up) { menu.move_up(); }
-        if keyboard.clicked(Key::Char('s')) | keyboard.clicked(Key::Down) { menu.move_down(); }
-
-        if keyboard.clicked(Key::Enter) {
+        if window.controls.clicked(Key::Enter) {
             match menu.current() {
-                "Play" => { window.sprites.push(create_player()); break; }
+                "Play" => {
+                    let frames = (1..=3)
+                        .map(|i| format!("assets/Sprites/Animated/Ship/shipsprite{}.bmp", i))
+                        .collect::<Vec<_>>();
+
+                    player_index = window.create_animated_bitmap_sprite_from_files(
+                        ((width / 2).saturating_sub(64 / 2), height - 100),
+                        100,
+                        frames,
+                        SpriteType::Player,
+                        120,
+                    );
+                    break;
+                }
                 "Exit" => std::process::exit(0),
                 _ => {}
             }
         }
-
+        bgs.update_playlist();
         window.draw();
         thread::sleep(Duration::from_millis(30));
     }
+
     remove_menu_text(window, &menu, "main_option");
     window.set_background_color(BLACK);
+    player_index
 }
 
+// --- Game Functions ---
+
+fn spawn_falling(
+    window: &mut Window,
+    rng: &mut impl Rng,
+    width: usize,
+    sprite_type: SpriteType,
+    size: (usize, usize),
+    color: u32,
+    health: i32,
+    speed: i32,
+) {
+    let x = rng.random_range(50..(width - 50));
+    window.sprites.push(Sprite {
+        sprite_type,
+        health,
+        position: (x, 0),
+        size,
+        render: SpriteRender::Color(color),
+        vectors: vec![Vector::Velocity(0, speed)],
+        is_solid: false,
+    });
+}
+
+// --- Main Loop ---
+
 fn main() {
-    let bgs = Bgs::new(SoundSource::File("assets/audio/bgs/Crimson Turn-Based Clash.wav"));
+    let playlist: Vec<SoundSource> = vec![
+        SoundSource::File("assets/audio/bgs/Crimson Gate Siege.wav"),
+        SoundSource::File("assets/audio/bgs/Crimson Turn-Based Clash.wav"),
+        SoundSource::File("assets/audio/bgs/Battle Textbox Theme.wav"),
+        SoundSource::File("assets/audio/bgs/Dragonfire Siege.wav"),
+        SoundSource::File("assets/audio/bgs/Fog over the Old Road.wav"),
+        SoundSource::File("assets/audio/bgs/Obsidian Gate Awakens.wav"),
+        SoundSource::File("assets/audio/bgs/Ruins of the Old Road.wav"),
+    ];
+    let mut bgs = Bgs::playlist(playlist);
+    
     bgs.playing(true);
+
     let mut window = Window::new("Arc Shooter", 800, 600);
     window.set_background_color(BLACK);
-    let mut keyboard = Keyboard::new();
     let audio = Audio {};
+    let mut rng = rand::rng();
 
-    let mut player_index = window.sprites.len();
-    // Start main menu
-    main_menu(&mut window, &mut keyboard);
-
-    // Create player
-    
-
+    let mut player_index = main_menu(&mut window, &mut bgs);
 
     let mut projectiles = Vec::new();
-    let mut enemies: Vec<EnemyData> = Vec::new();
     let mut score = 0;
-    let mut rng = rand::rng();
-    let mut last_spawn = Instant::now();
     let mut spawn_rate: f32 = rng.random_range(1.3..1.5);
+    let food_spawn_rate: f32 = 15.0;
+    let mut last_spawn = Instant::now();
+    let mut last_food_spawn = Instant::now();
     let score_id = "score";
     let health_id = "health";
     window.show_text(score_id, &format!("Score: {}", score), (10, 10), 4, WHITE, TextAlign::AutoFit);
@@ -69,47 +124,50 @@ fn main() {
 
     let mut paused = false;
     let mut pause_menu = Menu::new(vec!["Resume", "Exit"], RED, WHITE);
+    let mut player_dead = false;
 
     while window.is_open() {
-        keyboard.update();
+        bgs.update_playlist();
+        window.update_controls();
+        let (width, _) = window.get_size();
 
-        // --- Toggle pause ---
-        if keyboard.clicked(Key::Escape) { paused = true; }
+        if !window.is_focused() { paused = true; }
+        if window.controls.clicked(Key::Escape) { paused = true; }
 
-        // --- PAUSE MENU ---
+        // --- Pause Menu ---
         if paused {
             pause_menu.draw(&mut window, "pause_option");
-            
-            if keyboard.clicked(Key::Char('w')) | keyboard.clicked(Key::Up) { pause_menu.move_up(); }
-            if keyboard.clicked(Key::Char('s')) | keyboard.clicked(Key::Down) { pause_menu.move_down(); }
+            handle_menu_input(&mut window, &mut pause_menu);
 
-            if keyboard.clicked(Key::Enter) {
+            if window.controls.clicked(Key::Enter) {
                 match pause_menu.current() {
                     "Resume" => { paused = false; remove_menu_text(&mut window, &pause_menu, "pause_option"); }
                     "Exit" => {
                         remove_menu_text(&mut window, &pause_menu, "pause_option");
                         window.sprites.clear();
-                        main_menu(&mut window, &mut keyboard);
-                        window.sprites.push(create_player());
-                        player_index = window.sprites.len() - 1;
+                        player_index = main_menu(&mut window, &mut bgs);
+                        player_dead = false;
                         paused = false;
                     }
                     _ => {}
                 }
             }
             window.draw();
-            continue; // skip game update while paused
+            continue;
         }
 
-        // --- Update score display ---
+        // --- Update HUD ---
+        let health = if player_dead { 0 } else { window.sprites[player_index].health };
         window.update_text(score_id, &format!("Score: {}", score));
-        window.update_text(health_id, &format!("Health: {}", window.sprites[player_index].health));
-        // --- Player movement & shooting ---
-        let mut pos = window.sprites[player_index].position;
-        if window.is_focused() {
-            if keyboard.pressed(Key::Char('a')) { pos.0 = pos.0.saturating_sub(10); }
-            if keyboard.pressed(Key::Char('d')) { pos.0 = (pos.0 + 10).min(750); }
-            if keyboard.clicked(Key::Space) {
+        window.update_text(health_id, &format!("Health: {}", health));
+
+        // --- Player Actions ---
+        if !player_dead {
+            let mut pos = window.sprites[player_index].position;
+            if window.controls.pressed(Key::Char('a')) { pos.0 = pos.0.saturating_sub(10); }
+            if window.controls.pressed(Key::Char('d')) { pos.0 = (pos.0 + 10).min(width - window.sprites[player_index].size.0); }
+
+            if window.controls.clicked(Key::Space) {
                 let idx = window.sprites.len();
                 window.sprites.push(Sprite {
                     sprite_type: SpriteType::Projectile,
@@ -117,259 +175,86 @@ fn main() {
                     position: (pos.0 + 20, pos.1),
                     size: (10, 10),
                     render: SpriteRender::Color(WHITE),
-                    velocity: (0.0, 0.0),
-                    gravity: Direction::None,
                     is_solid: false,
+                    vectors: vec![Vector::Velocity(0, -10)],
                 });
                 projectiles.push(idx);
                 audio.play(SoundSource::BuiltIn(BuiltInSound::Shoot));
             }
+            window.move_sprite(player_index, pos);
         }
-        window.move_sprite(player_index, pos);
 
-        // --- Spawn enemies ---
+        // --- Enemy Spawn ---
         if last_spawn.elapsed().as_secs_f32() > spawn_rate {
             spawn_rate = rng.random_range(1.0..1.2);
-            let x = rng.random_range(50..750);
-            let idx = window.sprites.len();
-            window.sprites.push(Sprite {
-                sprite_type: SpriteType::Enemy,
-                health: 30,
-                position: (x, 0),
-                size: (50, 50),
-                render: SpriteRender::Color(RED),
-                velocity: (0.0, 0.0),
-                gravity: Direction::None,
-                is_solid: false,
-            });
-            enemies.push(EnemyData { index: idx, x_base: x as i32, amplitude: rng.random_range(30.0..80.0), frequency: rng.random_range(0.02..0.05), speed_y: rng.random_range(4..6), t: 0.0 });
+            let speed = rng.random_range(7..13);
+            spawn_falling(&mut window, &mut rng, width, SpriteType::Enemy, (50, 50), RED, 30, speed);
             last_spawn = Instant::now();
         }
 
-        // --- Movement & collisions ---
-        let mut dead_sprites = Vec::new();
-
-        // Projectiles
-        for &p in &projectiles {
-            if p >= window.sprites.len() { dead_sprites.push(p); continue; }
-            let mut pp = window.sprites[p].position;
-            pp.1 = pp.1.saturating_sub(10);
-            if pp.1 == 0 { dead_sprites.push(p); } else { window.move_sprite(p, pp); }
+        if last_food_spawn.elapsed().as_secs_f32() > food_spawn_rate {
+            spawn_rate = rng.random_range(1.0..1.2);
+            spawn_falling(&mut window, &mut rng, width, SpriteType::Custom("Food"), (30, 30), 0x00FF00, 1, 10);
+            last_food_spawn = Instant::now();
         }
+        window.change_health_on_collision(SpriteType::Player, SpriteType::Custom("Food"), 20);
+        window.remove_on_collision(SpriteType::Player, SpriteType::Custom("Food"));
+        window.change_health_on_collision(SpriteType::Enemy, SpriteType::Projectile, -10);
+        window.change_health_on_collision(SpriteType::Projectile, SpriteType::Enemy, -1000);
+        window.change_health_on_collision(SpriteType::Player, SpriteType::Enemy, -10);
+        window.remove_if_out_of_screen(SpriteType::Projectile);
+        window.remove_if_out_of_screen(SpriteType::Enemy);
+        window.increment_on_sprite_death(SpriteType::Enemy, &mut score, 100);
+        window.on_death(SpriteType::Enemy, |_, _| {
+            audio.play(SoundSource::File("assets/audio/sfx/hit.wav"));
+        });
+        window.change_health_on_collision(SpriteType::Enemy, SpriteType::Player, -200);
+        window.remove_on_death(SpriteType::Projectile);
+        window.remove_on_death(SpriteType::Enemy);
+        window.prevent_leaving_screen(SpriteType::Player);
+        window.add_vector(SpriteType::Projectile, Vector::Velocity(0, -10));
+        window.apply_vectors();
 
-        // Enemies
-        for e in &mut enemies {
-            if e.index >= window.sprites.len() { continue; }
-            let mut ep = window.sprites[e.index].position;
-            ep.1 += e.speed_y;
-            if ep.1 >= 550 { dead_sprites.push(e.index); continue; }
-
-            e.t += 1.0;
-            ep.0 = (e.x_base + (e.amplitude * (e.t * e.frequency).sin()) as i32 + ((pos.0 as i32 - e.x_base) / 25).clamp(-4, 4))
-                .clamp(0, 750) as usize;
-            window.move_sprite(e.index, ep);
-
-            // Projectile collision
-            for &p in &projectiles {
-                if p >= window.sprites.len() { continue; }
-                let pp = window.sprites[p].position;
-                if pp.0 < ep.0 + 50 && pp.0 + 10 > ep.0 && pp.1 < ep.1 + 50 && pp.1 + 10 > ep.1 {
-                    window.sprites[e.index].health -= 10;
-                    dead_sprites.push(p);
-                }
-            }
-
-            // Player collision with enemy
-            if pos.0 < ep.0 + 50 && pos.0 + 8 > ep.0 && pos.1 < ep.1 + 50 && pos.1 + 8 > ep.1 {
-                window.sprites[player_index].health = window.sprites[player_index].health.saturating_sub(20);
-                dead_sprites.push(e.index);
-            }
-
-            if window.sprites[e.index].health <= 0 { score += 100; dead_sprites.push(e.index); audio.play(SoundSource::File("assets/audio/sfx/hit.wav")); }
-        }
-
-        // --- Cleanup ---
-        dead_sprites.sort_unstable(); dead_sprites.dedup();
-        for &i in dead_sprites.iter().rev() { if i < window.sprites.len() { window.remove_sprite(i); } }
-        projectiles.retain(|p| !dead_sprites.contains(p));
-        for p in &mut projectiles { *p -= dead_sprites.iter().filter(|&&d| d < *p).count(); }
-        enemies.retain(|e| !dead_sprites.contains(&e.index));
-        for e in &mut enemies { e.index -= dead_sprites.iter().filter(|&&d| d < e.index).count(); }
-
-        window.update_physics();
         window.draw();
 
-        // --- Check player death ---
-        if window.sprites[player_index].health == 0 {
-            // Remove the dead player sprite so it doesn’t keep drawing
+        // --- Player Death Check ---
+        if !player_dead && window.sprites[player_index].health == 0 {
             window.remove_sprite(player_index);
+            window.update_text(health_id, &format!("Health: {}", health));
 
-            // Game Over menu
+            // --- Game Over Menu ---
             let mut gameover_menu = Menu::new(vec!["Play Again", "Exit"], RED, WHITE);
             loop {
-                keyboard.update();
+                window.update_controls();
                 gameover_menu.draw(&mut window, "gameover_option");
+                handle_menu_input(&mut window, &mut gameover_menu);
 
-                if keyboard.clicked(Key::Char('w')) | keyboard.clicked(Key::Up) { gameover_menu.move_up(); }
-                if keyboard.clicked(Key::Char('s')) | keyboard.clicked(Key::Down) { gameover_menu.move_down(); }
-
-                if keyboard.clicked(Key::Enter) {
+                if window.controls.clicked(Key::Enter) {
                     match gameover_menu.current() {
                         "Play Again" => {
-                            // Reset everything
                             window.sprites.clear();
                             projectiles.clear();
-                            enemies.clear();
                             score = 0;
 
                             // Recreate player
-                            let player = create_player();
-                            player_index = window.sprites.len();
-                            window.sprites.push(player);
+                            let frames = (1..=3)
+                                .map(|i| format!("assets/Sprites/Animated/Ship/shipsprite{}.bmp", i))
+                                .collect::<Vec<_>>();
+                            player_index = window.create_animated_bitmap_sprite_from_files(
+                                (375, 500), 100, frames, SpriteType::Player, 120
+                            );
 
                             remove_menu_text(&mut window, &gameover_menu, "gameover_option");
-                            break; // exit menu and restart loop
+                            player_dead = false;
+                            break;
                         }
                         "Exit" => std::process::exit(0),
                         _ => {}
                     }
                 }
-
                 window.draw();
                 thread::sleep(Duration::from_millis(30));
             }
         }
     }
-}
-
-
-fn row_fuselage(start: usize, end: usize) -> Vec<u32> {
-    let mut r = vec![0; 64];
-    for x in start..end { r[x] = WHITE; }
-    r
-}
-
-fn row_cockpit() -> Vec<u32> {
-    let mut r = vec![0; 64];
-    for x in 26..38 { r[x] = WHITE; }
-    for x in 29..35 { r[x] = FOREST_GREEN; }
-    r
-}
-
-fn row_wings(start: usize, end: usize) -> Vec<u32> {
-    let mut r = vec![0; 64];
-    for x in start..end { r[x] = DARK_GREEN; }
-    for x in 26..38 { r[x] = WHITE; }
-    r
-}
-
-fn row_tail_wings(start: usize, end: usize) -> Vec<u32> {
-    let mut r = vec![0; 64];
-    for x in start..end { r[x] = DARK_GREEN; }
-    for x in 28..36 { r[x] = WHITE; }
-    r
-}
-
-fn row_tail_fin() -> Vec<u32> {
-    let mut r = vec![0; 64];
-    for x in 30..34 { r[x] = WHITE; }
-    r
-}
-
-
-fn create_player() -> Sprite {
-
-    let plane_bitmap: Vec<Vec<u32>> = vec![
-        // 0–7 nose
-        vec![0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,WHITE,WHITE,WHITE,WHITE,WHITE,WHITE,WHITE,WHITE,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-        vec![0;64],
-        vec![0;64],
-        vec![0;64],
-        vec![0;64],
-        vec![0;64],
-        vec![0;64],
-        vec![0;64],
-
-        // 8–15 tapered nose
-        row_fuselage(30,34),
-        row_fuselage(29,35),
-        row_fuselage(28,36),
-        row_fuselage(28,36),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(26,38),
-        row_fuselage(26,38),
-
-        // 16–23 cockpit
-        row_cockpit(),
-        row_cockpit(),
-        row_fuselage(26,38),
-        row_fuselage(26,38),
-        row_fuselage(26,38),
-        row_fuselage(26,38),
-        row_fuselage(26,38),
-        row_fuselage(26,38),
-
-        // 24–31 wings
-        row_wings(10,54),
-        row_wings(12,52),
-        row_wings(14,50),
-        row_wings(16,48),
-        row_wings(18,46),
-        row_wings(20,44),
-        row_wings(22,42),
-        row_wings(24,40),
-
-        // 32–43 tail boom
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-        row_fuselage(27,37),
-
-        // 44–51 tail wings
-        row_tail_wings(22,42),
-        row_tail_wings(24,40),
-        row_tail_wings(26,38),
-        row_tail_wings(26,38),
-        row_tail_wings(24,40),
-        row_tail_wings(22,42),
-        row_fuselage(28,36),
-        row_fuselage(28,36),
-
-        // 52–63 tail fin
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-        row_tail_fin(),
-    ];
-
-
-    let sprite = Sprite {
-        sprite_type: SpriteType::Player,
-        health: 100,
-        position: (375, 500),
-        size: (8, 8),
-        render: SpriteRender::Bitmap { pixels: plane_bitmap },
-        velocity: (0.0, 0.0),
-        gravity: Direction::None,
-        is_solid: false,
-    };
-    // sprite.upscale(8);
-    sprite
 }

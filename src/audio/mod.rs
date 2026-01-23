@@ -21,6 +21,9 @@ pub enum BuiltInSound {
 pub struct Audio {}
 
 impl Audio {
+    pub fn new() -> Self {
+        Self { }
+    }
     pub fn play(&self, sound: SoundSource) {
         thread::spawn(move || {
             // Open audio stream
@@ -66,34 +69,84 @@ impl Audio {
 
 /// Background sound player that loops until paused or dropped
 pub struct Bgs {
-    _stream: OutputStream,              // keep alive
-    stream_handle: OutputStream,        // handle for sinks
-    sink: Arc<Mutex<Sink>>,             // current sink
-    source: Arc<Mutex<SoundSource>>,    // current source
+    _stream: OutputStream,                 // keep alive
+    stream_handle: OutputStream,           // handle for sinks
+    sink: Arc<Mutex<Sink>>,                // current sink
+    source: Arc<Mutex<SoundSource>>,       // current source
+
+    playlist: Arc<Mutex<Vec<SoundSource>>>,
+    playlist_index: Arc<Mutex<usize>>,
 }
+
 
 impl Bgs {
     /// Create new BGS with initial source
     pub fn new(initial_source: SoundSource) -> Self {
         let _stream = OutputStreamBuilder::open_default_stream().expect("Failed stream");
         let stream_handle = OutputStreamBuilder::open_default_stream().expect("Failed handle");
-
         let sink = Sink::connect_new(&stream_handle.mixer());
-
-        let source_arc = Arc::new(Mutex::new(initial_source.clone()));
         let sink_arc = Arc::new(Mutex::new(sink));
 
         let bgs = Self {
             _stream,
             stream_handle,
             sink: sink_arc.clone(),
-            source: source_arc.clone(),
+            source: Arc::new(Mutex::new(initial_source.clone())),
+            playlist: Arc::new(Mutex::new(vec![initial_source.clone()])),
+            playlist_index: Arc::new(Mutex::new(0)),
         };
 
         bgs.playing(true); // start immediately
         bgs.set_source(initial_source); // append looping source
 
         bgs
+    }
+
+    pub fn playlist(sources: Vec<SoundSource>) -> Self {
+        assert!(!sources.is_empty(), "Playlist cannot be empty");
+
+        let _stream = OutputStreamBuilder::open_default_stream().expect("Failed stream");
+        let stream_handle = OutputStreamBuilder::open_default_stream().expect("Failed handle");
+
+        let sink = Sink::connect_new(&stream_handle.mixer());
+        let sink_arc = Arc::new(Mutex::new(sink));
+        let first = sources[0].clone();
+
+        let bgs = Self {
+            _stream,
+            stream_handle,
+            sink: sink_arc.clone(),
+            source: Arc::new(Mutex::new(first.clone())),
+            playlist: Arc::new(Mutex::new(sources)),
+            playlist_index: Arc::new(Mutex::new(0)),
+        };
+
+        bgs.playing(true);
+        bgs.set_source(first);
+
+        bgs
+    }
+
+    pub fn update_playlist(&self) {
+        let should_advance = {
+            let sink = self.sink.lock().unwrap();
+            sink.empty()
+        };
+
+        if !should_advance {
+            return;
+        }
+
+        let mut index = self.playlist_index.lock().unwrap();
+        let playlist = self.playlist.lock().unwrap();
+
+        *index = (*index + 1) % playlist.len();
+        let next = playlist[*index].clone();
+
+        drop(playlist);
+        drop(index);
+
+        self.set_source(next);
     }
 
     /// Pause/unpause playback

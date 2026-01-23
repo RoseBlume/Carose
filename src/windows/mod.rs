@@ -1,15 +1,15 @@
 pub mod text;
 mod background;
-
+use crate::controls::Input;
 
 use text::{
     get_font_map,
     TextItem
 };
-use std::str::FromStr;
 use minifb::{Window as MfWindow, WindowOptions};
-use crate::sprites::{SpriteRender, Sprite, Direction};
+use crate::sprites::{SpriteRender, Sprite};
 use std::collections::HashMap;
+
 
 pub enum Background {
     Color(u32),
@@ -26,8 +26,9 @@ pub struct Window {
     pub texts: HashMap<String, TextItem>,
     window: minifb::Window,
 
-    pub paused: bool,
+    pub controls: Input,
 
+    pub paused: bool,
 }
 
 impl Window {
@@ -37,7 +38,7 @@ impl Window {
             width,
             height,
             WindowOptions {
-                resize: false,
+                resize: true,
                 ..WindowOptions::default()
             },
         )
@@ -52,12 +53,16 @@ impl Window {
             background: None,
             texts: HashMap::new(),
             window,
+
+            controls: Input::new(),
+
             paused: false,
         }
     }
-
-
-    
+    pub fn update_controls(&mut self) {
+        let focused = self.window.is_active();
+        self.controls.poll(focused);
+    }
 
     
 
@@ -72,10 +77,11 @@ impl Window {
     pub fn set_title(&mut self, title: &str) {
         self.window.set_title(title);
     }
-    #[cfg(target_os = "windows")]
-    pub fn set_icon(&mut self, icon: &str) {
-        self.window.set_icon(minifb::Icon::from_str(icon).unwrap());
-    }
+    // #[cfg(target_os = "windows")]
+    // pub fn set_icon(&mut self, icon: &str) {
+        
+    //     self.window.set_icon(minifb::Icon::from_str(icon).unwrap());
+    // }
 
     pub fn set_position(&mut self, x: isize, y: isize) {
         self.window.set_position(x, y);
@@ -96,26 +102,19 @@ impl Window {
     pub fn get_size(&self) -> (usize, usize) {
         self.window.get_size()
     }
+
+    pub fn get_width(&self) -> usize {
+        self.window.get_size().0
+    }
+
+    pub fn get_height(&self) -> usize {
+        self.window.get_size().1
+    }
+
     pub fn is_focused(&mut self) -> bool {
         self.window.is_active()
     }
     
-    pub fn update_physics(&mut self) {
-        for sprite in &mut self.sprites {
-            // Skip walls/floors if we had them
-            if sprite.is_solid { continue; }
-
-            // For now, we just set velocity & gravity fields, no actual movement
-            sprite.velocity = (0.0, 0.0); // velocity not applied yet
-            sprite.gravity = Direction::None; // gravity disabled for now
-
-            // Position would normally be updated by velocity here:
-            // let new_x = sprite.position.0 as f32 + sprite.velocity.0;
-            // let new_y = sprite.position.1 as f32 + sprite.velocity.1;
-            // sprite.position.0 = new_x as usize;
-            // sprite.position.1 = new_y as usize;
-        }
-    }
 
     pub fn draw(&mut self) {
         // --- Create buffer with background ---
