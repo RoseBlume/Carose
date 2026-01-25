@@ -7,6 +7,13 @@ license = "MIT"
 repository = "https://github.com/RoseBlume/carose"
 description = "A lightweight 2D Rust game library for sprites, menus, audio, and input handling."
 
+
+include = [
+    "src/**",
+    "Cargo.toml",
+    "README.md",
+]
+
 [dependencies]
 image = "0.25.9"
 minifb = "0.28.0"
