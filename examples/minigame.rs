@@ -106,7 +106,7 @@ fn main() {
 
     let mut window = Window::new("Arc Shooter", 800, 600);
     window.set_background_color(BLACK);
-    let audio = Audio {};
+    let audio = Audio::new();
     let mut rng = rand::rng();
 
     let mut player_index = main_menu(&mut window, &mut bgs);
@@ -235,7 +235,7 @@ fn main() {
                             window.sprites.clear();
                             projectiles.clear();
                             score = 0;
-
+                            
                             // Recreate player
                             let frames = (1..=3)
                                 .map(|i| format!("assets/Sprites/Animated/Ship/shipsprite{}.bmp", i))

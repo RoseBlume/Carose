@@ -18,12 +18,39 @@ pub enum BuiltInSound {
     Kill,
 }
 
+/// Lightweight audio playback utility for one-shot sound effects.
+///
+/// `Audio` is designed for fire-and-forget sound playback. Each sound
+/// is played asynchronously on its own thread and does not require
+/// manual lifecycle management.
 pub struct Audio {}
 
 impl Audio {
+    /// Creates a new audio playback helper.
+    ///
+    /// This does not allocate or open any audio resources until a sound
+    /// is played.
     pub fn new() -> Self {
-        Self { }
+        Self {}
     }
+
+    /// Plays a sound asynchronously.
+    ///
+    /// The sound is played on a detached thread and will run to completion
+    /// without blocking the caller. This is intended for short sound effects
+    /// such as UI feedback, shots, or impacts.
+    ///
+    /// # Parameters
+    /// - `sound`: The sound source to play (file-based or built-in).
+    ///
+    /// # Notes
+    /// - Each call spawns a new thread.
+    /// - Audio playback uses a temporary audio stream and sink.
+    /// - Playback ends automatically when the sound finishes.
+    /// - This method is fire-and-forget; there is no pause or stop control.
+    ///
+    /// # Panics
+    /// Panics if the audio stream or sound source cannot be created.
     pub fn play(&self, sound: SoundSource) {
         thread::spawn(move || {
             // Open audio stream
@@ -80,7 +107,23 @@ pub struct Bgs {
 
 
 impl Bgs {
-    /// Create new BGS with initial source
+    /// Creates a new background sound system with a single looping source.
+    ///
+    /// This initializes an audio output stream, creates an internal sink,
+    /// and immediately begins playback of the provided sound source.
+    ///
+    /// The initial source is also inserted into a playlist, allowing the
+    /// background sound system to be extended later into a rotating playlist.
+    ///
+    /// # Parameters
+    /// - `initial_source`: The sound source to loop and play immediately.
+    ///
+    /// # Panics
+    /// Panics if the default audio output stream or sink cannot be created.
+    ///
+    /// # Notes
+    /// - Playback starts automatically.
+    /// - The source is looped infinitely.
     pub fn new(initial_source: SoundSource) -> Self {
         let _stream = OutputStreamBuilder::open_default_stream().expect("Failed stream");
         let stream_handle = OutputStreamBuilder::open_default_stream().expect("Failed handle");
@@ -102,6 +145,20 @@ impl Bgs {
         bgs
     }
 
+    /// Creates a new background sound system using a playlist of sound sources.
+    ///
+    /// The playlist will automatically advance when the current source finishes.
+    /// Playback begins immediately, starting from the first source in the list.
+    ///
+    /// # Parameters
+    /// - `sources`: A non-empty list of sound sources to play in sequence.
+    ///
+    /// # Panics
+    /// Panics if `sources` is empty or if the audio stream cannot be created.
+    ///
+    /// # Notes
+    /// - The playlist loops infinitely.
+    /// - Sources are played in the order provided.
     pub fn playlist(sources: Vec<SoundSource>) -> Self {
         assert!(!sources.is_empty(), "Playlist cannot be empty");
 
@@ -126,7 +183,15 @@ impl Bgs {
 
         bgs
     }
-
+    /// Advances the playlist if the current sound has finished playing.
+    ///
+    /// This should be called regularly (e.g., once per frame or tick).
+    /// If the sink is empty, the playlist index is advanced and the next
+    /// source is loaded and played.
+    ///
+    /// # Behavior
+    /// - If the current source is still playing, this method does nothing.
+    /// - If the end of the playlist is reached, playback wraps to the beginning.
     pub fn update_playlist(&self) {
         let should_advance = {
             let sink = self.sink.lock().unwrap();
@@ -149,7 +214,15 @@ impl Bgs {
         self.set_source(next);
     }
 
-    /// Pause/unpause playback
+    /// Pauses or resumes playback.
+    ///
+    /// # Parameters
+    /// - `play`: If `true`, playback resumes or continues.
+    ///           If `false`, playback is paused.
+    ///
+    /// # Notes
+    /// - This does not reset the current sound.
+    /// - The playback position is preserved when pausing.
     pub fn playing(&self, play: bool) {
         let sink = self.sink.lock().unwrap();
         if play {
@@ -159,7 +232,22 @@ impl Bgs {
         }
     }
 
-    /// Change the looping source dynamically
+    /// Replaces the currently playing source with a new looping source.
+    ///
+    /// The existing sink is stopped and replaced with a fresh sink
+    /// connected to the same output stream. The new source begins
+    /// playing immediately and loops infinitely.
+    ///
+    /// # Parameters
+    /// - `new_source`: The sound source to load and play.
+    ///
+    /// # Notes
+    /// - This method is thread-safe.
+    /// - File-based sources are decoded at load time.
+    /// - Built-in sounds are procedurally generated.
+    ///
+    /// # Panics
+    /// Panics if a sound file cannot be opened or decoded.
     pub fn set_source(&self, new_source: SoundSource) {
         let mut source_lock = self.source.lock().unwrap();
         *source_lock = new_source.clone();

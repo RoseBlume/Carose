@@ -4,11 +4,12 @@ use crate::Window;
 
 
 impl Sprite {
-
-    /* =======================
-       VELOCITY
-       ======================= */
-
+    /// Set the sprite's velocity vector.
+    ///
+    /// If a velocity vector already exists, it is replaced.
+    /// Otherwise, a new velocity vector is added.
+    ///
+    /// Values represent `(dx, dy)` in pixels per update tick.
     pub fn set_velocity(&mut self, vx: i32, vy: i32) {
         if let Some(Vector::Velocity(x, y)) =
             self.vectors.iter_mut().find(|v| matches!(v, Vector::Velocity(_, _)))
@@ -20,6 +21,10 @@ impl Sprite {
         }
     }
 
+    /// Update one or both components of the sprite's velocity.
+    ///
+    /// - `None` leaves the corresponding component unchanged.
+    /// - If no velocity vector exists, one is created.
     pub fn update_velocity(&mut self, vx: Option<i32>, vy: Option<i32>) {
         if let Some(Vector::Velocity(x, y)) =
             self.vectors.iter_mut().find(|v| matches!(v, Vector::Velocity(_, _)))
@@ -34,10 +39,18 @@ impl Sprite {
         }
     }
 
+    /// Remove the sprite's velocity vector.
+    ///
+    /// After calling this method, the sprite will no longer
+    /// move unless a new velocity is added.
     pub fn remove_velocity(&mut self) {
         self.vectors.retain(|v| !matches!(v, Vector::Velocity(_, _)));
     }
 
+    /// Retrieve the current velocity of the sprite.
+    ///
+    /// Returns `Some((dx, dy))` if a velocity vector exists,
+    /// or `None` if the sprite has no velocity.
     pub fn velocity(&self) -> Option<(i32, i32)> {
         self.vectors.iter().find_map(|v| {
             if let Vector::Velocity(x, y) = *v {
@@ -48,10 +61,12 @@ impl Sprite {
         })
     }
 
-    /* =======================
-       ACCELERATION
-       ======================= */
-
+    /// Set the sprite's acceleration vector.
+    ///
+    /// If an acceleration vector already exists, it is replaced.
+    /// Otherwise, a new acceleration vector is added.
+    ///
+    /// Values represent `(ax, ay)` in pixels per tick².
     pub fn set_acceleration(&mut self, ax: i32, ay: i32) {
         if let Some(Vector::Acceleration(x, y)) =
             self.vectors.iter_mut().find(|v| matches!(v, Vector::Acceleration(_, _)))
@@ -63,10 +78,15 @@ impl Sprite {
         }
     }
 
+    /// Remove the sprite's acceleration vector.
+    ///
+    /// After calling this method, the sprite's velocity
+    /// will no longer be modified by acceleration.
     pub fn remove_acceleration(&mut self) {
         self.vectors.retain(|v| !matches!(v, Vector::Acceleration(_, _)));
     }
 }
+
 
 
 impl Window {

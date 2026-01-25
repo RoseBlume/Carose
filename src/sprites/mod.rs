@@ -1,62 +1,134 @@
+use crate::image::{
+    load_sprite_sheet,
+    load_image_2d
+};
 use crate::Window;
 mod vectors;
 
-#[derive(Clone, Copy)]
-pub enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-    Custom(i32, i32),
-}
 
+
+/// Motion-related vectors applied to a sprite.
+///
+/// Vectors are evaluated by the engine to update sprite movement
+/// and physics-like behavior.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Vector {
+    /// Constant velocity applied every update tick.
+    ///
+    /// Values represent `(dx, dy)` in pixels per frame.
     Velocity(i32, i32),
+
+    /// Acceleration applied to velocity each update tick.
+    ///
+    /// Values represent `(ax, ay)` in pixels per frame².
     Acceleration(i32, i32),
 }
 
+
+/// Rendering data for a sprite.
+///
+/// Determines how a sprite is drawn to the screen.
 #[derive(Clone)]
 pub enum SpriteRender {
+    /// Solid-color rectangle fill.
+    ///
+    /// The contained value is a packed color (ARGB or RGB,
+    /// depending on renderer configuration).
     Color(u32),
 
+    /// Static bitmap sprite.
+    ///
+    /// Pixels are stored in row-major order.
+    /// A value of `0` is treated as transparent.
     Bitmap {
-        pixels: Vec<Vec<u32>>, // row-major, 0 = transparent
+        /// 2D pixel buffer: rows → columns.
+        pixels: Vec<Vec<u32>>,
     },
 
-    /// Animated bitmap (multi-color, variable size)
+    /// Animated bitmap sprite.
+    ///
+    /// Frames are cycled automatically using a fixed frame delay.
     AnimatedBitmap {
-        frames: Vec<Vec<Vec<u32>>>, // frames → rows → pixels
+        /// Animation frames stored as 2D pixel buffers.
+        frames: Vec<Vec<Vec<u32>>>,
+
+        /// Index of the currently displayed frame.
         frame_index: usize,
+
+        /// Number of ticks between frame changes.
         frame_delay: u32,
+
+        /// Internal frame timer.
         frame_timer: u32,
     },
 }
 
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+
+/// Logical category of a sprite.
+///
+/// Used for collision detection, game rules,
+/// and sprite management.
+#[derive(Clone, PartialEq, Eq, Debug, Copy)]
 pub enum SpriteType {
+    /// Player-controlled entity.
     Player,
+
+    /// Hostile or AI-controlled entity.
     Enemy,
+
+    /// Projectile such as bullets or spells.
     Projectile,
+
+    /// Static solid object that blocks movement.
     Wall,
+
+    /// Non-interactive visual overlay.
     Overlay,
+
+    /// User-defined sprite category.
+    ///
+    /// Useful for custom logic without modifying the enum.
     Custom(&'static str),
 }
 
+
+/// A renderable and interactive game entity.
+///
+/// Sprites represent all visible objects in the world,
+/// including players, enemies, projectiles, and environment objects.
 pub struct Sprite {
+    /// Logical classification of the sprite.
     pub sprite_type: SpriteType,
+
+    /// Current health value.
+    ///
+    /// When health reaches zero or below, the sprite is considered dead.
     pub health: i32,
+
+    /// Top-left position in screen coordinates.
     pub position: (usize, usize),
+
+    /// Logical size of the sprite in pixels.
     pub size: (usize, usize),
+
+    /// Rendering data used to draw the sprite.
     pub render: SpriteRender,
+
+    /// Whether the sprite blocks movement.
     pub is_solid: bool,
-    pub vectors: Vec<Vector>, // new
+
+    /// Motion vectors applied to the sprite.
+    ///
+    /// Includes velocity and acceleration components.
+    pub vectors: Vec<Vector>,
 }
+
 
 
 
 impl Sprite {
+    // Multiply size by a defined amount
     pub fn upscale(&mut self, factor: usize) {
         if factor <= 1 {
             return;
@@ -122,41 +194,123 @@ impl Sprite {
             }
         }
     }
+
+    /// Create a solid-color rectangular sprite.
+    pub fn new_color(
+        position: (usize, usize),
+        size: (usize, usize),
+        sprite_type: SpriteType,
+        health: i32,
+        color: u32,
+        is_solid: bool,
+    ) -> Self {
+        Sprite {
+            sprite_type,
+            health,
+            position,
+            size,
+            render: SpriteRender::Color(color),
+            is_solid,
+            vectors: Vec::new(),
+        }
+    }
+
+    /// Create a bitmap sprite from a 2D pixel buffer.
+    ///
+    /// Pixels with value `0` are treated as transparent.
+    pub fn new_bitmap(
+        position: (usize, usize),
+        sprite_type: SpriteType,
+        health: i32,
+        pixels: Vec<Vec<u32>>,
+        is_solid: bool,
+    ) -> Self {
+        let height = pixels.len();
+        let width = if height > 0 { pixels[0].len() } else { 0 };
+
+        Sprite {
+            sprite_type,
+            health,
+            position,
+            size: (width, height),
+            render: SpriteRender::Bitmap { pixels },
+            is_solid,
+            vectors: Vec::new(),
+        }
+    }
+
+    /// Create an animated bitmap sprite from preloaded frames.
+    ///
+    /// All frames are assumed to be the same size.
+    pub fn new_animated_bitmap(
+        position: (usize, usize),
+        sprite_type: SpriteType,
+        health: i32,
+        frames: Vec<Vec<Vec<u32>>>,
+        frame_delay: u32,
+        is_solid: bool,
+    ) -> Self {
+        let (width, height) = if let Some(frame) = frames.first() {
+            let h = frame.len();
+            let w = if h > 0 { frame[0].len() } else { 0 };
+            (w, h)
+        } else {
+            (0, 0)
+        };
+
+        Sprite {
+            sprite_type,
+            health,
+            position,
+            size: (width, height),
+            render: SpriteRender::AnimatedBitmap {
+                frames,
+                frame_index: 0,
+                frame_delay,
+                frame_timer: 0,
+            },
+            is_solid,
+            vectors: Vec::new(),
+        }
+    }
+
+    /// Create a wall sprite (solid, indestructible).
+    pub fn new_wall(
+        position: (usize, usize),
+        size: (usize, usize),
+    ) -> Self {
+        Sprite {
+            sprite_type: SpriteType::Wall,
+            health: i32::MAX,
+            position,
+            size,
+            render: SpriteRender::Color(0x555555),
+            is_solid: true,
+            vectors: Vec::new(),
+        }
+    }
 }
 
 impl Window {
-    fn load_bitmap_from_file(path: &str) -> Vec<Vec<u32>> {
-        let img = image::open(path).expect("Failed to open image").to_rgba8();
-        let (width, height) = img.dimensions();
-        let mut bitmap = vec![vec![0; width as usize]; height as usize];
 
-        for y in 0..height {
-            for x in 0..width {
-                let pixel = img.get_pixel(x, y);
-                // Convert RGBA to u32 (ARGB format)
-                let argb = ((pixel[3] as u32) << 24) // alpha
-                    | ((pixel[0] as u32) << 16)     // red
-                    | ((pixel[1] as u32) << 8)      // green
-                    | (pixel[2] as u32);            // blue
-                bitmap[y as usize][x as usize] = argb;
-            }
-        }
-
-        bitmap
-    }
-
-    // Load a single bitmap sprite from a file
+    /// Create a bitmap sprite from an image file.
+    ///
+    /// The image is loaded from disk and used as the sprite's pixel data.
+    /// Returns the index of the newly created sprite.
     pub fn create_bitmap_sprite_from_file(
         &mut self,
         position: (usize, usize),
         path: &str,
         sprite_type: SpriteType,
     ) -> usize {
-        let bitmap = Self::load_bitmap_from_file(path);
+        let bitmap = load_image_2d(path).expect("Failed to load image");
         self.create_bitmap_sprite(position, bitmap, sprite_type)
     }
 
-    // Load multiple files as an animated sprite
+    /// Create an animated sprite from multiple image files.
+    ///
+    /// Each file represents a single animation frame.
+    /// Returns the index of the newly created sprite.
     pub fn create_animated_bitmap_sprite_from_files(
         &mut self,
         position: (usize, usize),
@@ -167,10 +321,16 @@ impl Window {
     ) -> usize {
         let frames: Vec<Vec<Vec<u32>>> = paths
             .iter()
-            .map(|path| Self::load_bitmap_from_file(path))
+            .map(|path| load_image_2d(path).expect("Failed to load image"))
             .collect();
+
         self.create_animated_bitmap_sprite(position, health, frames, sprite_type, frame_delay)
     }
+
+    /// Create an animated sprite from preloaded frames.
+    ///
+    /// Each frame is a 2D bitmap. All frames are assumed to be the same size.
+    /// Returns the index of the newly created sprite.
     pub fn create_animated_sprite(
         &mut self,
         position: (usize, usize),
@@ -190,12 +350,17 @@ impl Window {
                 frame_index: 0,
                 frame_delay,
                 frame_timer: 0,
-            },    // gravity disabled for now
-            is_solid: false,             // not a wall/floor
+            },
+            is_solid: false,
             vectors: Vec::new(),
         });
         self.sprites.len() - 1
     }
+
+    /// Create a solid-colored rectangular sprite.
+    ///
+    /// Useful for debug objects, simple entities, or placeholders.
+    /// Returns the index of the newly created sprite.
     pub fn create_colored_sprite(
         &mut self,
         position: (usize, usize),
@@ -204,48 +369,78 @@ impl Window {
         health: i32,
         color: u32,
     ) -> usize {
+        self.sprites.push(
+            Sprite::new_color(position, size, sprite_type, health, color, false)
+        );
+
         self.sprites.push(Sprite {
             sprite_type,
             health,
             position,
             size,
-            render: SpriteRender::Color(color),    // gravity disabled for now
-            is_solid: false,             // not a wall/floor
-            vectors: vec![Vector::Velocity(0, 0)]
+            render: SpriteRender::Color(color),
+            is_solid: false,
+            vectors: vec![Vector::Velocity(0, 0)],
         });
         self.sprites.len() - 1
     }
+
+    /// Create a bitmap sprite from an already loaded 2D pixel buffer.
+    ///
+    /// Pixels with value `0` are treated as transparent.
+    /// Returns the index of the newly created sprite.
     pub fn create_bitmap_sprite(
         &mut self,
         position: (usize, usize),
-        bitmap: Vec<Vec<u32>>, // 2D pixels (0 = transparent)
+        bitmap: Vec<Vec<u32>>,
         sprite_type: SpriteType,
     ) -> usize {
-        let height = bitmap.len();
-        let width = if height > 0 { bitmap[0].len() } else { 0 };
+        
 
-        self.sprites.push(Sprite {
-            sprite_type,
-            health: 1,
-            position,
-            size: (width, height), // logical size
-            render: SpriteRender::Bitmap {
-                pixels: bitmap,
-            },
-            is_solid: false,
-            vectors: Vec::new(),
-        });
+        self.sprites.push(
+            Sprite::new_bitmap(position, sprite_type, 1, bitmap, false)
+        );
 
         self.sprites.len() - 1
     }
+
+    /// Create an animated bitmap sprite from preloaded frames.
+    ///
+    /// Frames are advanced automatically using `frame_delay`.
+    /// Returns the index of the newly created sprite.
     pub fn create_animated_bitmap_sprite(
         &mut self,
         position: (usize, usize),
         health: i32,
-        bitmaps: Vec<Vec<Vec<u32>>>, // frames → rows → pixels
+        bitmaps: Vec<Vec<Vec<u32>>>,
         sprite_type: SpriteType,
         frame_delay: u32,
     ) -> usize {
+        self.sprites.push(
+            Sprite::new_animated_bitmap(position, sprite_type, health, bitmaps, frame_delay, false)
+        );
+
+        self.sprites.len() - 1
+    }
+
+    /// Create an animated sprite from a sprite sheet.
+    ///
+    /// The sprite sheet is sliced into frames using the provided
+    /// width and height.
+    /// Returns the index of the newly created sprite.
+    pub fn create_animated_sprite_from_sheet(
+        &mut self,
+        position: (usize, usize),
+        health: i32,
+        sheet: &str,
+        width: u32,
+        height: u32,
+        sprite_type: SpriteType,
+        frame_delay: u32,
+    ) -> usize {
+        let bitmaps = load_sprite_sheet(sheet, width, height)
+            .expect("Failed to load sprite frames from sheet");
+
         let (width, height) = if let Some(frame) = bitmaps.first() {
             let h = frame.len();
             let w = if h > 0 { frame[0].len() } else { 0 };
@@ -258,7 +453,7 @@ impl Window {
             sprite_type,
             health,
             position,
-            size: (width, height), // logical size
+            size: (width, height),
             render: SpriteRender::AnimatedBitmap {
                 frames: bitmaps,
                 frame_index: 0,
@@ -271,10 +466,15 @@ impl Window {
 
         self.sprites.len() - 1
     }
+
+    /// Create an indestructible wall sprite.
+    ///
+    /// Walls are solid and block movement.
+    /// Returns the index of the newly created sprite.
     pub fn create_wall(&mut self, position: (usize, usize), size: (usize, usize)) -> usize {
         self.sprites.push(Sprite {
             sprite_type: SpriteType::Wall,
-            health: i32::MAX, // indestructible
+            health: i32::MAX,
             position,
             size,
             render: SpriteRender::Color(0x555555),
@@ -283,6 +483,8 @@ impl Window {
         });
         self.sprites.len() - 1
     }
+
+    /// Advance the animation state of an animated sprite render.
     pub fn advance_animation(render: &mut SpriteRender) {
         if let SpriteRender::AnimatedBitmap {
             frames,
@@ -297,18 +499,22 @@ impl Window {
             }
         }
     }
+
+    /// Move a sprite to a new position.
     pub fn move_sprite(&mut self, index: usize, new_pos: (usize, usize)) {
         if let Some(sprite) = self.sprites.get_mut(index) {
             sprite.position = new_pos;
         }
     }
 
+    /// Remove a sprite by index.
     pub fn remove_sprite(&mut self, index: usize) {
         if index < self.sprites.len() {
             self.sprites.remove(index);
         }
     }
 
+    /// Invoke a callback for each sprite of a given type that has died.
     pub fn on_death<F>(&mut self, sprite_type: SpriteType, mut on_death: F)
     where
         F: FnMut(&mut Window, usize),
@@ -322,6 +528,7 @@ impl Window {
         }
     }
 
+    /// Invoke a callback when two sprite types collide.
     pub fn on_collision<F>(
         &mut self,
         a_type: SpriteType,
@@ -349,21 +556,18 @@ impl Window {
                 let (x2, y2) = self.sprites[j].position;
                 let (w2, h2) = self.sprites[j].size;
 
-                let intersects =
-                    x1 < x2 + w2 &&
-                    x1 + w1 > x2 &&
-                    y1 < y2 + h2 &&
-                    y1 + h1 > y2;
-
-                if intersects {
+                if x1 < x2 + w2 &&
+                   x1 + w1 > x2 &&
+                   y1 < y2 + h2 &&
+                   y1 + h1 > y2
+                {
                     on_collision(self, i, j);
                 }
             }
         }
     }
 
-
-
+    /// Change the health of sprites when they collide with another type.
     pub fn change_health_on_collision(
         &mut self,
         target_type: SpriteType,
@@ -395,6 +599,8 @@ impl Window {
             }
         }
     }
+
+    /// Remove all dead sprites of a given type.
     pub fn remove_on_death(&mut self, sprite_type: SpriteType) {
         let mut dead_indices = Vec::new();
         for (i, sprite) in self.sprites.iter().enumerate() {
@@ -407,6 +613,8 @@ impl Window {
             self.remove_sprite(i);
         }
     }
+
+    /// Remove sprites of a given type when they collide with another type.
     pub fn remove_on_collision(
         &mut self,
         collider_type: SpriteType,
@@ -431,15 +639,13 @@ impl Window {
                 let (x2, y2) = self.sprites[j].position;
                 let (w2, h2) = self.sprites[j].size;
 
-                let intersects =
-                    x1 < x2 + w2 &&
-                    x1 + w1 > x2 &&
-                    y1 < y2 + h2 &&
-                    y1 + h1 > y2;
-
-                if intersects {
+                if x1 < x2 + w2 &&
+                   x1 + w1 > x2 &&
+                   y1 < y2 + h2 &&
+                   y1 + h1 > y2
+                {
                     dead_indices.push(i);
-                    break; // stop checking once collided
+                    break;
                 }
             }
         }
@@ -449,7 +655,7 @@ impl Window {
         }
     }
 
-    /// Remove sprites completely outside the screen
+    /// Remove sprites that are completely outside the screen bounds.
     pub fn remove_if_out_of_screen(&mut self, sprite_type: SpriteType) {
         let mut dead_indices = Vec::new();
 
@@ -461,20 +667,19 @@ impl Window {
             let w = sprite.size.0 as i32;
             let h = sprite.size.1 as i32;
 
-            // Fully outside the screen
-            if x + w <= 0 || x >= self.width as i32 || y + h <= 0 || y >= self.height as i32 {
+            if x + w <= 0 || x >= self.width as i32
+                || y + h <= 0 || y >= self.height as i32
+            {
                 dead_indices.push(i);
             }
         }
 
-        // Remove from back to avoid index shift
         for &i in dead_indices.iter().rev() {
             self.remove_sprite(i);
         }
     }
 
-
-    /// Prevent sprites of a given type from leaving the screen bounds
+    /// Clamp sprites of a given type so they remain inside the screen.
     pub fn prevent_leaving_screen(&mut self, sprite_type: SpriteType) {
         for sprite in self.sprites.iter_mut() {
             if sprite.sprite_type != sprite_type { continue; }
@@ -488,6 +693,8 @@ impl Window {
             sprite.position = (new_x, new_y);
         }
     }
+
+    /// Increase a score value when sprites of a given type die.
     pub fn increment_on_sprite_death(
         &mut self,
         sprite_type: SpriteType,
@@ -501,13 +708,12 @@ impl Window {
 
             if sprite.health <= 0 {
                 *score += points;
-
-                // Prevent double-scoring
                 sprite.health = i32::MIN;
             }
         }
     }
 
+    /// Change sprite health when fully outside the screen.
     pub fn change_health_offscreen(&mut self, sprite_type: SpriteType, health_change: i32) {
         let (width, height) = self.get_size();
         for sprite in &mut self.sprites {
@@ -518,7 +724,6 @@ impl Window {
             let (x, y) = sprite.position;
             let (w, h) = sprite.size;
 
-            // Check if fully outside screen
             if x + w <= 0 || x >= width || y + h <= 0 || y >= height {
                 sprite.health = sprite.health.saturating_add(health_change);
             }

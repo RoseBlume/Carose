@@ -12,7 +12,7 @@ fn main() {
     // --- Audio ---
     let bgs = Bgs::new(SoundSource::File("assets/audio/bgs/Crimson Turn-Based Clash.wav"));
     bgs.playing(true);
-    let audio = Audio {};
+    let audio = Audio::new();
 
     // --- Window ---
     let mut window = Window::new("Flappy Bird Clone", 400, 600);
@@ -54,7 +54,6 @@ fn main() {
         }
 
         window.draw();
-        thread::sleep(Duration::from_millis(30));
     }
 
     // --- Game Variables ---
